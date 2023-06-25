@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import morgan from 'morgan';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -14,6 +15,7 @@ async function bootstrap() {
       key: readFileSync(join(__dirname, '..', 'privkey.pem')),
     },
   });
+  app.use(morgan('dev'));
 
   const config = app.get(ConfigService);
 
@@ -36,7 +38,6 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
 
   app.enableCors();
-  console.log(config.get('PORT'));
   await app.listen(config.get('PORT'));
 }
 bootstrap();
