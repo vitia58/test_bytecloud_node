@@ -15,7 +15,9 @@ export const validateArray = async <T extends object>(
 
   const validationLines = await Promise.all(
     array
-      .map((entity) => plainToClass(type, entity))
+      .map((entity) =>
+        plainToClass(type, entity, { enableImplicitConversion: true }),
+      )
       .map(async (entity) => ({
         entity,
         error: await validate(entity, {
@@ -26,10 +28,19 @@ export const validateArray = async <T extends object>(
 
   resultObject.errors = validationLines
     .filter(({ error }) => error && error.length > 0)
-    .map(({ error, entity }) => ({
-      entity,
-      error: Object.values(error[0].constraints)[0],
-    }));
+    .map(({ error: [error], entity }) => {
+      let errorPath = '';
+      do {
+        errorPath += `${error.property}.`;
+
+        error = error.children[0];
+      } while (error.children.length > 0);
+
+      return {
+        entity,
+        error: errorPath + Object.values(error.constraints)[0],
+      };
+    });
 
   resultObject.result = validationLines
     .filter(({ error }) => error && error.length == 0)
