@@ -1,24 +1,28 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsDateString,
-  IsNumber,
+  IsInt,
   IsObject,
   IsOptional,
   Matches,
   Min,
   Validate,
+  ValidateNested,
 } from 'class-validator';
 import { TimeValidator } from 'src/common/validators/TimeValidator';
 import { TimeSchema } from 'src/models/TimeSchema';
 
 export class AddPatientDTO {
   @Min(0)
-  @IsNumber()
+  @IsInt()
   @ApiProperty()
   id: number;
 
   @ApiProperty({ type: TimeSchema, example: { from: 12, to: 13 } })
   @Validate(TimeValidator, { message: 'Incorrect time' })
+  @ValidateNested()
+  @Type(() => TimeSchema)
   @IsObject()
   time: TimeSchema;
 
