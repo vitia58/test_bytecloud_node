@@ -25,16 +25,17 @@ export const validateArray = async <T extends object>(
         }),
       })),
   );
+  console.log(JSON.stringify(validationLines));
 
   resultObject.errors = validationLines
     .filter(({ error }) => error && error.length > 0)
     .map(({ error: [error], entity }) => {
       let errorPath = '';
-      do {
+      while (error.children.length > 0) {
         errorPath += `${error.property}.`;
 
         error = error.children[0];
-      } while (error.children.length > 0);
+      }
 
       return {
         entity,

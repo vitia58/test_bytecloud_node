@@ -59,20 +59,17 @@ export class AppointmentService {
     const appointments: Appointment[] = await this.appointmentModel.aggregate([
       ...AppointmentPipeline.lookupDoctors(),
       ...AppointmentPipeline.lookupPatients(),
+      {
+        $addFields: {
+          originalTime: '$time',
+        },
+      },
     ]);
-
-    /* PREPARING SLOTS */
 
     const doctors: Doctor[] = await this.doctorModel.find({
       id: {
         $in: appointments.map(({ idDoctor }) => idDoctor),
       },
-    });
-
-    doctors.forEach((doctor) => {
-      doctor.slots = Array.from(new Array(doctor.time.to).keys()).filter(
-        (time) => time >= doctor.time.from,
-      );
     });
 
     const patients: Patient[] = await this.patientModel.find({
@@ -81,122 +78,120 @@ export class AppointmentService {
       },
     });
 
-    patients.forEach((patient) => {
-      patient.slots = Array.from(new Array(patient.time.to).keys()).filter(
-        (time) => time >= patient.time.from,
-      );
-    });
-
-    /* CLONNING AND SORTING BY IMPORTANCE */
+    const hours = Array.from(new Array(24).keys());
 
     const sortObj = {
       [Status.RED]: -2,
       [Status.YELLOW]: -1,
+      [Status.BLUE]: 0,
       [Status.GREEN]: 0,
     };
 
-    let clonedAppointments = cloneDeep(appointments).sort(
-      (a, b) => sortObj[a.status] - sortObj[b.status],
-    );
+    let prevAppointments = appointments;
+    let clonedAppointments = prevAppointments;
 
     /* PROCESSING */
 
-    clonedAppointments.forEach(() => {
-      if (clonedAppointments.every(({ solved }) => solved)) return;
+    do {
+      /* CLONNING FOR RETRY PROCESSING AND SORTING BY IMPORTANCE */
 
-      /* FINDING THE MOST IMPORTANT SLOT */
-
-      const appointmentSlots = clonedAppointments
-        .filter(({ solved }) => !solved)
-        .map((appointment) => {
-          const patient = patients.find(
-            (patient) => patient.id == appointment.idPatient,
-          );
-
-          const doctor = doctors.find(
-            (doctor) => doctor.id == appointment.idDoctor,
-          );
-
-          const slots = patient.slots.filter((slot) =>
-            doctor.slots.includes(slot),
-          );
-
-          return {
-            patient,
-            doctor,
-            slots,
-            appointment,
-          };
-        })
-        .filter(({ slots }) => slots.length > 0)
-        .sort((a, b) => {
-          if (a.appointment.status !== b.appointment.status) {
-            return (
-              sortObj[a.appointment.status] - sortObj[b.appointment.status]
-            );
-          }
-
-          return a.slots.length - b.slots.length;
-        });
-
-      if (appointmentSlots.length == 0) {
-        // IF RUN OUT OF SLOTS
-        clonedAppointments
-          .filter(({ solved }) => !solved)
-          .forEach((appointment) => {
-            appointment.status = Status.RED;
-          });
-      } else {
-        /* COMPLETING APPOINTMENT FOR EXSISTING OR NEW TIME */
-
-        const firstAppointmentSlot = appointmentSlots[0];
-
-        const foundAppointment = firstAppointmentSlot.appointment;
-        foundAppointment.solved = true;
-
-        const hasAvilableSlot = firstAppointmentSlot.slots.includes(
-          foundAppointment.time,
-        );
-
-        const selectedSlot = hasAvilableSlot
-          ? foundAppointment.time
-          : firstAppointmentSlot.slots.at(-1);
-
-        foundAppointment.status = hasAvilableSlot ? Status.GREEN : Status.BLUE;
-
-        foundAppointment.time = selectedSlot;
-
-        firstAppointmentSlot.patient.slots.splice(
-          firstAppointmentSlot.patient.slots.indexOf(selectedSlot),
-          1,
-        );
-
-        firstAppointmentSlot.doctor.slots.splice(
-          firstAppointmentSlot.doctor.slots.indexOf(selectedSlot),
-          1,
-        );
-      }
-    });
-
-    /* OPTIMIZING TRANSVERS */
-
-    appointments.forEach((appointment) => {
-      // FINDING SWAIPED TIME AFTER SOLVING SLOTS
-      const found = clonedAppointments.find(
-        ({ idDoctor, idPatient, time, status }) =>
-          appointment.idDoctor == idDoctor &&
-          appointment.idPatient == idPatient &&
-          appointment.time == time &&
-          appointment.status == Status.GREEN &&
-          status == Status.BLUE,
+      prevAppointments = clonedAppointments.map(
+        ({ solved, ...appointment }) => ({ ...appointment, solved: false }),
       );
-      if (found) found.status = Status.GREEN;
-    });
+      clonedAppointments = cloneDeep(prevAppointments).sort(
+        (a, b) => sortObj[a.status] - sortObj[b.status],
+      );
 
-    // CHECKING IS PREVIOUS VARIANT BETTER THEN NEW
-    if (this.checkEqual(appointments, clonedAppointments)) {
-      clonedAppointments = appointments;
-    }
+      /* PREPARING SLOTS */
+
+      patients.forEach((patient) => {
+        patient.slots = hours.slice(patient.time.from, patient.time.to);
+      });
+      doctors.forEach((doctor) => {
+        doctor.slots = hours.slice(doctor.time.from, doctor.time.to);
+      });
+
+      clonedAppointments.forEach(() => {
+        if (clonedAppointments.every(({ solved }) => solved)) return;
+
+        /* FINDING THE MOST IMPORTANT SLOT */
+
+        const appointmentSlots = clonedAppointments
+          .filter(({ solved }) => !solved)
+          .map((appointment) => {
+            const patient = patients.find(
+              (patient) => patient.id == appointment.idPatient,
+            );
+
+            const doctor = doctors.find(
+              (doctor) => doctor.id == appointment.idDoctor,
+            );
+
+            const slots = patient.slots.filter((slot) =>
+              doctor.slots.includes(slot),
+            );
+
+            return {
+              patient,
+              doctor,
+              slots,
+              appointment,
+            };
+          })
+          .filter(({ slots }) => slots.length > 0)
+          .sort((a, b) => {
+            if (a.appointment.status !== b.appointment.status) {
+              return (
+                sortObj[a.appointment.status] - sortObj[b.appointment.status]
+              );
+            }
+
+            return a.slots.length - b.slots.length;
+          });
+
+        if (appointmentSlots.length == 0) {
+          // IF RUN OUT OF SLOTS
+          clonedAppointments
+            .filter(({ solved }) => !solved)
+            .forEach((appointment) => {
+              appointment.status = Status.RED;
+            });
+        } else {
+          /* COMPLETING APPOINTMENT FOR EXSISTING OR NEW TIME */
+
+          const firstAppointmentSlot = appointmentSlots[0];
+
+          const foundAppointment = firstAppointmentSlot.appointment;
+          foundAppointment.solved = true;
+
+          const hasAvilableSlot = firstAppointmentSlot.slots.includes(
+            foundAppointment.originalTime,
+          );
+
+          const selectedSlot = hasAvilableSlot
+            ? foundAppointment.originalTime
+            : firstAppointmentSlot.slots.at(-1);
+
+          foundAppointment.status = hasAvilableSlot
+            ? Status.GREEN
+            : Status.BLUE;
+
+          foundAppointment.time = selectedSlot;
+
+          firstAppointmentSlot.patient.slots.splice(
+            firstAppointmentSlot.patient.slots.indexOf(selectedSlot),
+            1,
+          );
+
+          firstAppointmentSlot.doctor.slots.splice(
+            firstAppointmentSlot.doctor.slots.indexOf(selectedSlot),
+            1,
+          );
+        }
+      });
+
+      /* MAKING SOME RETRIES FOR OPTIMISING RESULTS */
+    } while (!this.checkEqual(prevAppointments, clonedAppointments));
 
     /* SORTING FOR APPLICATION */
 
@@ -207,7 +202,7 @@ export class AppointmentService {
     ];
 
     const modifiedAppointment = clonedAppointments
-      .map(({ solved, _id, ...appointment }) => appointment)
+      .map(({ solved, _id, originalTime, ...appointment }) => appointment)
       .sort((a, b) => {
         for (const order of sortOrder) {
           if (a[order] !== b[order]) {
@@ -219,7 +214,9 @@ export class AppointmentService {
 
     return {
       modifiedAppointment,
-      appointments,
+      appointments: appointments.map(
+        ({ originalTime, ...appointments }) => appointments,
+      ),
     };
   }
 

@@ -27,6 +27,8 @@ export class Appointment {
   doctor: Doctor;
 
   solved: boolean;
+
+  originalTime: number;
 }
 
 export const AppointmentSchema = SchemaFactory.createForClass(Appointment);
