@@ -25,7 +25,7 @@ export const validateArray = async <T extends object>(
         }),
       })),
   );
-  console.log(JSON.stringify(validationLines));
+  // console.log(JSON.stringify(validationLines));
 
   resultObject.errors = validationLines
     .filter(({ error }) => error && error.length > 0)

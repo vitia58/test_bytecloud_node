@@ -55,6 +55,9 @@ export class AppointmentService {
 
   async getAppointments() {
     console.log('getAppointments()');
+    console.time();
+
+    /* FETCHING DATA */
 
     const appointments: Appointment[] = await this.appointmentModel.aggregate([
       ...AppointmentPipeline.lookupDoctors(),
@@ -77,6 +80,7 @@ export class AppointmentService {
         $in: appointments.map(({ idPatient }) => idPatient),
       },
     });
+    console.timeLog();
 
     const hours = Array.from(new Array(24).keys());
 
@@ -89,15 +93,17 @@ export class AppointmentService {
 
     let prevAppointments = appointments;
     let clonedAppointments = prevAppointments;
+    const bestOptimisingResults = {};
 
     /* PROCESSING */
 
     do {
       /* CLONNING FOR RETRY PROCESSING AND SORTING BY IMPORTANCE */
 
-      prevAppointments = clonedAppointments.map(
-        ({ solved, ...appointment }) => ({ ...appointment, solved: false }),
-      );
+      prevAppointments = clonedAppointments.map((appointment) => ({
+        ...appointment,
+        solved: false,
+      }));
       clonedAppointments = cloneDeep(prevAppointments).sort(
         (a, b) => sortObj[a.status] - sortObj[b.status],
       );
@@ -190,18 +196,43 @@ export class AppointmentService {
         }
       });
 
-      /* MAKING SOME RETRIES FOR OPTIMISING RESULTS */
+      /* CALCULATING SCORE OF CURRENT RESULT */
+
+      const scoreResults = clonedAppointments.reduce(
+        (prev, cur) => ({
+          ...prev,
+          [cur.status]: (prev[cur.status] ?? 0) + 1,
+        }),
+        {} as Record<Status, number>,
+      );
+
+      const score =
+        scoreResults.red +
+        (scoreResults.blue + scoreResults.green * appointments.length) *
+          appointments.length;
+
+      Object.assign(bestOptimisingResults, { [score]: clonedAppointments });
+
+      /* MAKING SOME RETRIES TO FIND THE BEST OPTIMISED RESULT */
     } while (!this.checkEqual(prevAppointments, clonedAppointments));
+    console.timeLog();
+
+    /* FINDING THE BEST RESULT WITH MAX SCORE */
+
+    const bestAppointmentSchedule: typeof clonedAppointments =
+      bestOptimisingResults[
+        Math.max(...Object.keys(bestOptimisingResults).map((key) => +key))
+      ];
 
     /* SORTING FOR APPLICATION */
 
-    const sortOrder: (keyof (typeof clonedAppointments)[0])[] = [
+    const sortOrder: (keyof (typeof bestAppointmentSchedule)[0])[] = [
       'idPatient',
       'idDoctor',
       'time',
     ];
 
-    const modifiedAppointment = clonedAppointments
+    const modifiedAppointment = bestAppointmentSchedule
       .map(({ solved, _id, originalTime, ...appointment }) => appointment)
       .sort((a, b) => {
         for (const order of sortOrder) {
@@ -211,6 +242,7 @@ export class AppointmentService {
         }
         return 0;
       });
+    console.timeEnd();
 
     return {
       modifiedAppointment,
