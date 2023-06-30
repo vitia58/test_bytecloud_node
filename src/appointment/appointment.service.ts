@@ -133,8 +133,8 @@ export class AppointmentService {
               (doctor) => doctor.id == appointment.idDoctor,
             );
 
-            const slots = patient.slots.filter((slot) =>
-              doctor.slots.includes(slot),
+            const slots = (patient?.slots ?? []).filter((slot) =>
+              (doctor?.slots ?? []).includes(slot),
             );
 
             return {
@@ -201,9 +201,9 @@ export class AppointmentService {
       const scoreResults = clonedAppointments.reduce(
         (prev, cur) => ({
           ...prev,
-          [cur.status]: (prev[cur.status] ?? 0) + 1,
+          [cur.status]: prev[cur.status] + 1,
         }),
-        {} as Record<Status, number>,
+        { red: 0, green: 0, blue: 0 } as Record<Status, number>,
       );
 
       const score =
@@ -223,6 +223,10 @@ export class AppointmentService {
       bestOptimisingResults[
         Math.max(...Object.keys(bestOptimisingResults).map((key) => +key))
       ];
+
+    bestAppointmentSchedule.forEach((appointment) => {
+      if (appointment.status == Status.RED) appointment.originalTime;
+    });
 
     /* SORTING FOR APPLICATION */
 

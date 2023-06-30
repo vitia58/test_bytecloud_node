@@ -34,7 +34,7 @@ export class AppointmentController {
   async createAppointment(@Body() appointment: AddAppointmentDTO) {
     const appointmentResult = await this.service.createAppointment(appointment);
 
-    this.updateAppointments();
+    await this.updateAppointments();
 
     return appointmentResult;
   }
@@ -47,7 +47,7 @@ export class AppointmentController {
       (appointment) => this.service.createAppointment(appointment),
     );
 
-    if (result.length != 0) this.updateAppointments();
+    if (result.length != 0) await this.updateAppointments();
 
     return { errors, appointments: result };
   }
@@ -72,7 +72,7 @@ export class AppointmentController {
     if (!this.service.checkEqual(appointments, modifiedAppointment)) {
       await this.service.approve({ appointments, modifiedAppointment });
 
-      this.updateAppointments();
+      await this.updateAppointments();
     }
   }
 
@@ -80,7 +80,7 @@ export class AppointmentController {
   async clear() {
     const clearResult = await this.service.clear();
 
-    this.updateAppointments();
+    await this.updateAppointments();
 
     return clearResult;
   }
