@@ -69,20 +69,43 @@ export class AppointmentService {
       },
     ]);
 
-    const doctors: Doctor[] = await this.doctorModel.find({
+    const hours = Array.from(new Array(24).keys());
+
+    const doctorsList: Doctor[] = await this.doctorModel.find({
       id: {
         $in: appointments.map(({ idDoctor }) => idDoctor),
       },
     });
 
-    const patients: Patient[] = await this.patientModel.find({
+    const doctorsOriginal = doctorsList.reduce(
+      (prev, doctor) => ({
+        ...prev,
+        [doctor.id]: {
+          ...doctor,
+          slots: hours.slice(doctor.time.from, doctor.time.to),
+        },
+      }),
+      {} as Record<string, Doctor>,
+    );
+
+    const patientsList: Patient[] = await this.patientModel.find({
       id: {
         $in: appointments.map(({ idPatient }) => idPatient),
       },
     });
-    console.timeLog();
 
-    const hours = Array.from(new Array(24).keys());
+    const patientsOriginal = patientsList.reduce(
+      (prev, patient) => ({
+        ...prev,
+        [patient.id]: {
+          ...patient,
+          slots: hours.slice(patient.time.from, patient.time.to),
+        },
+      }),
+      {} as Record<string, Patient>,
+    );
+
+    console.timeLog();
 
     const sortObj = {
       [Status.RED]: -2,
@@ -97,25 +120,16 @@ export class AppointmentService {
 
     /* PROCESSING */
 
-    do {
-      /* CLONNING FOR RETRY PROCESSING AND SORTING BY IMPORTANCE */
+    const processSchedule = (appointments: Appointment[]) => {
+      const clonedAppointments = cloneDeep(
+        appointments.map((appointment) => ({
+          ...appointment,
+          solved: false,
+        })),
+      ).sort((a, b) => sortObj[a.status] - sortObj[b.status]);
 
-      prevAppointments = clonedAppointments.map((appointment) => ({
-        ...appointment,
-        solved: false,
-      }));
-      clonedAppointments = cloneDeep(prevAppointments).sort(
-        (a, b) => sortObj[a.status] - sortObj[b.status],
-      );
-
-      /* PREPARING SLOTS */
-
-      patients.forEach((patient) => {
-        patient.slots = hours.slice(patient.time.from, patient.time.to);
-      });
-      doctors.forEach((doctor) => {
-        doctor.slots = hours.slice(doctor.time.from, doctor.time.to);
-      });
+      const patients = cloneDeep(patientsOriginal);
+      const doctors = cloneDeep(doctorsOriginal);
 
       clonedAppointments.forEach(() => {
         if (clonedAppointments.every(({ solved }) => solved)) return;
@@ -125,13 +139,9 @@ export class AppointmentService {
         const appointmentSlots = clonedAppointments
           .filter(({ solved }) => !solved)
           .map((appointment) => {
-            const patient = patients.find(
-              (patient) => patient.id == appointment.idPatient,
-            );
+            const patient = patients[appointment.idPatient];
 
-            const doctor = doctors.find(
-              (doctor) => doctor.id == appointment.idDoctor,
-            );
+            const doctor = doctors[appointment.idDoctor];
 
             const slots = (patient?.slots ?? []).filter((slot) =>
               (doctor?.slots ?? []).includes(slot),
@@ -206,12 +216,41 @@ export class AppointmentService {
         { red: 0, green: 0, blue: 0 } as Record<Status, number>,
       );
 
-      const score =
-        scoreResults.red +
-        (scoreResults.blue + scoreResults.green * appointments.length) *
-          appointments.length;
+      const score = -(
+        scoreResults.green +
+        (scoreResults.blue + scoreResults.red * appointments.length) *
+          appointments.length
+      );
 
-      Object.assign(bestOptimisingResults, { [score]: clonedAppointments });
+      return { score, clonedAppointments };
+    };
+
+    do {
+      prevAppointments = clonedAppointments;
+      const withoutTime = processSchedule(
+        clonedAppointments.map(({ originalTime, ...appointment }) => ({
+          ...appointment,
+          originalTime: null,
+          originalTime2: originalTime,
+        })),
+      );
+      const withTime = processSchedule(clonedAppointments);
+      if (withTime.score >= withoutTime.score) {
+        clonedAppointments = withTime.clonedAppointments;
+      } else {
+        clonedAppointments = withoutTime.clonedAppointments.map(
+          ({
+            originalTime2,
+            ...appointment
+          }: Appointment & { originalTime2: number }) => ({
+            ...appointment,
+            originalTime: originalTime2,
+          }),
+        );
+      }
+      Object.assign(bestOptimisingResults, {
+        [Math.max(withTime.score, withoutTime.score)]: clonedAppointments,
+      });
 
       /* MAKING SOME RETRIES TO FIND THE BEST OPTIMISED RESULT */
     } while (!this.checkEqual(prevAppointments, clonedAppointments));
